@@ -24,6 +24,8 @@ var LivePrefixState struct {
 var conn net.Conn
 var reader *bufio.Reader
 var suggests []prompt.Suggest
+var enableRaw bool = true
+var jsonFormatter *colorjson.Formatter
 
 func read() string {
 	out, err := reader.ReadString('\n')
@@ -33,34 +35,38 @@ func read() string {
 	return out
 }
 
-func executor(in string) {
-	if strings.ToUpper(in) == "QUIT" || strings.ToUpper(in) == "EXIT" {
-		conn.Close()
-		os.Exit(0)
-	}
-	fmt.Fprintf(conn, in+"\n")
+func handleOutput() {
 	output := read()
 	jsonStr := []byte("")
-	f := colorjson.NewFormatter()
-	f.Indent = 4
-	// pretty print json objects
-	if output[0:2] == "{\"" && output[len(output)-2:len(output)-1] == "}" {
-		// case of a json object
-		var obj map[string]interface{}
-		json.Unmarshal([]byte(output), &obj)
-		jsonStr, _ = f.Marshal(obj)
-	}
-	if output[0:1] == "[" && output[len(output)-2:len(output)-1] == "]" {
-		// case of a json array
-		var obj []interface{}
-		json.Unmarshal([]byte(output), &obj)
-		jsonStr, _ = f.Marshal(obj)
+	if enableRaw {
+		// pretty print json objects
+		if output[0:2] == "{\"" && output[len(output)-2:len(output)-1] == "}" {
+			// case of a json object
+			var obj map[string]interface{}
+			json.Unmarshal([]byte(output), &obj)
+			jsonStr, _ = jsonFormatter.Marshal(obj)
+		}
+		if output[0:1] == "[" && output[len(output)-2:len(output)-1] == "]" {
+			// case of a json array
+			var obj []interface{}
+			json.Unmarshal([]byte(output), &obj)
+			jsonStr, _ = jsonFormatter.Marshal(obj)
+		}
 	}
 	if len(jsonStr) == 0 {
 		fmt.Print(output)
 	} else {
 		fmt.Println(string(jsonStr))
 	}
+}
+
+func executor(in string) {
+	if strings.ToUpper(in) == "QUIT" || strings.ToUpper(in) == "EXIT" {
+		conn.Close()
+		os.Exit(0)
+	}
+	fmt.Fprintf(conn, in+"\n")
+	handleOutput()
 }
 
 func completer(in prompt.Document) []prompt.Suggest {
@@ -75,13 +81,34 @@ func changeLivePrefix() (string, bool) {
 }
 
 func main() {
-	var url string
-	if len(os.Args) == 1 {
+	var commandsToRun []string
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		panic(err)
+	}
+	if !(fi.Mode()&os.ModeNamedPipe == 0) {
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		commandsToRun = strings.Split(string(input), ";")
+	}
+	var url string = ""
+	for _, arg := range os.Args {
+		if arg == "-r" || arg == "--raw" {
+			enableRaw = false
+		} else {
+			url = arg
+		}
+	}
+
+	if url == "" {
 		url = "127.0.0.1"
-	} else {
-		url = os.Args[1]
 	}
 	options := connexion.ParseURL(url)
+
+	if enableRaw {
+		jsonFormatter = colorjson.NewFormatter()
+		jsonFormatter.Indent = 4
+	}
 
 	// connect to socket
 	tmpConn, err := net.Dial("tcp", options.Host+":"+options.Port)
@@ -131,6 +158,20 @@ func main() {
 		LivePrefixState.LivePrefix += "/" + options.Group
 	}
 
+	// AUTOMATIC MODE
+	if len(commandsToRun) > 0 {
+		for key, cmd := range commandsToRun {
+			if len(commandsToRun)-1 == key {
+				cmd = cmd[0 : len(cmd)-1]
+			}
+			cmd = strings.Trim(cmd, " ") + " "
+			conn.Write([]byte(cmd))
+			handleOutput()
+		}
+		os.Exit(0)
+	}
+
+	// MANUAL MOOE
 	// fetch all commands
 	conn.Write([]byte("HELP "))
 	out := read()
