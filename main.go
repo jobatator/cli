@@ -92,16 +92,15 @@ func main() {
 		commandsToRun = strings.Split(string(input), ";")
 	}
 	var url string = ""
-	for _, arg := range os.Args {
+	for key, arg := range os.Args {
+		if key == 0 {
+			break
+		}
 		if arg == "-r" || arg == "--raw" {
 			enableRaw = false
-		} else {
+		} else if len(arg) > 1 {
 			url = arg
 		}
-	}
-
-	if url == "" {
-		url = "127.0.0.1"
 	}
 	options := connexion.ParseURL(url)
 

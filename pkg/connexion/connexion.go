@@ -39,6 +39,9 @@ func ParseURL(url string) Options {
 		}
 	}
 	options.URL = url
+	if options.Host == "" {
+		options.Host = "127.0.0.1"
+	}
 	if options.Port == "" {
 		options.Port = "8962"
 	}
